@@ -1,0 +1,20 @@
+{
+  "name": "@quill-ai/task-1-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task 1: Custom MCP Server with Strict Zod Validation and Stdio Transport",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts tests"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "3.25.76"
+  }
+}

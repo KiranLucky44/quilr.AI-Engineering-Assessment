@@ -1,0 +1,19 @@
+{
+  "name": "@quill-ai/task-3-llm-streaming-guardrail",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task 3: LLM Streaming Gateway with Real-Time Stateful PII Redaction",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config ../../vitest.config.ts tests"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  }
+}

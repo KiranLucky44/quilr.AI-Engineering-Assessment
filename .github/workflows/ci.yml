@@ -1,0 +1,44 @@
+name: CI Verification Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build, Typecheck, Lint, Format & Test (Node 24 LTS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build all workspace packages
+        run: npm run build
+
+      - name: Run strict TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run ESLint static analysis
+        run: npm run lint
+
+      - name: Verify Prettier code formatting
+        run: npm run format:check
+
+      - name: Execute full automated test suite
+        run: npm test

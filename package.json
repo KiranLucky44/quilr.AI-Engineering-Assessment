@@ -1,0 +1,45 @@
+{
+  "name": "quill-ai-engineering-assessment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QuillAI Senior AI Infrastructure & Security Engineering Assessment Monorepo",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
+  },
+  "workspaces": [
+    "packages/task-1-mcp-server",
+    "packages/task-2-mcp-security-gateway",
+    "packages/task-3-llm-streaming-guardrail",
+    "packages/task-4-model-router"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:task1": "npm run dev --workspace=@quill-ai/task-1-mcp-server",
+    "dev:task2": "npm run dev --workspace=@quill-ai/task-2-mcp-security-gateway",
+    "dev:task3": "npm run dev --workspace=@quill-ai/task-3-llm-streaming-guardrail",
+    "dev:task4": "npm run dev --workspace=@quill-ai/task-4-model-router",
+    "test": "vitest run",
+    "test:task1": "vitest run packages/task-1-mcp-server/tests",
+    "test:task2": "vitest run packages/task-2-mcp-security-gateway/tests",
+    "test:task3": "vitest run packages/task-3-llm-streaming-guardrail/tests",
+    "test:task4": "vitest run packages/task-4-model-router/tests",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint packages vitest.config.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "24.19.2",
+    "eslint": "9.39.5",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "3.2.7"
+  }
+}
