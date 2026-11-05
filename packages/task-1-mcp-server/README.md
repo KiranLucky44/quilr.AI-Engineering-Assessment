@@ -56,6 +56,7 @@ You can pipe MCP JSON-RPC messages directly over `stdin` to observe pure JSON-RP
 **Bash:**
 
 **Bash:**
+
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-cli","version":"1.0.0"}}}' \
@@ -77,6 +78,7 @@ printf '%s\n' \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-cli","version":"1.0.0"}}}

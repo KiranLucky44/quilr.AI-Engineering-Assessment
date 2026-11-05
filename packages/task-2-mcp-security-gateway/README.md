@@ -50,6 +50,7 @@ npm run test:task2
 **Bash:**
 
 **Bash:**
+
 ```bash
 curl -i -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
@@ -65,6 +66,7 @@ curl -i -X POST http://127.0.0.1:4010/mcp \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":1,"method":"tools/list"}
@@ -76,6 +78,7 @@ curl -i -X POST http://127.0.0.1:4010/mcp \
 **Bash:**
 
 **Bash:**
+
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
@@ -92,6 +95,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":"list-1","method":"tools/list"}
@@ -103,6 +107,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 **Bash:**
 
 **Bash:**
+
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
@@ -119,6 +124,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":"call-normal","method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}
@@ -130,6 +136,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 **Bash:**
 
 **Bash:**
+
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
@@ -146,6 +153,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":"call-blocked","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
@@ -167,6 +175,7 @@ Expected response:
 **Bash:**
 
 **Bash:**
+
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
@@ -183,6 +192,7 @@ curl -s -X POST http://127.0.0.1:4010/mcp \
 ```
 
 **Windows PowerShell:**
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":"call-admin","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
