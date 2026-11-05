@@ -103,6 +103,8 @@ export async function writeSseWithBackpressure(
   });
 }
 
+const MAX_SSE_EVENT_BUFFER_CHARS = 65_536;
+
 /**
  * Incrementally parses raw byte/text chunks from an upstream OpenAI-compatible SSE stream,
  * handling arbitrary TCP frame boundaries across `data: ...` lines and `\n\n` separators.
@@ -129,8 +131,20 @@ export async function* parseUpstreamSseEvents(
 
       const dataLines: string[] = [];
       for (const line of rawEventBlock.split('\n')) {
+        const trimmedLine = line.trim();
+        if (trimmedLine.length === 0 || trimmedLine.startsWith(':')) {
+          continue;
+        }
         if (line.startsWith('data:')) {
           dataLines.push(line.slice(5).trimStart());
+        } else if (
+          line.startsWith('event:') ||
+          line.startsWith('id:') ||
+          line.startsWith('retry:')
+        ) {
+          continue;
+        } else {
+          throw new Error('Malformed upstream SSE frame line.');
         }
       }
 
@@ -144,5 +158,24 @@ export async function* parseUpstreamSseEvents(
 
       boundaryIdx = buffer.indexOf('\n\n');
     }
+
+    if (buffer.length > MAX_SSE_EVENT_BUFFER_CHARS) {
+      throw new Error('Upstream SSE event exceeded maximum frame buffer size.');
+    }
+  }
+
+  if (signal.aborted) {
+    return;
+  }
+
+  buffer += decoder.decode();
+  const remainingLines = buffer
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith(':'));
+
+  if (remainingLines.length > 0) {
+    throw new Error('Truncated upstream SSE event frame at end of stream.');
   }
 }

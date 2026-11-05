@@ -76,6 +76,25 @@ describe('StreamingRedactor Core Semantics & Bounded Buffering (Task 3)', () => 
     expect(res.output).toBe('Reach [REDACTED]');
   });
 
+  it('safely flushes both complete terminal PII and benign incomplete prefixes at stream end', () => {
+    // Complete PII right at EOF without trailing punctuation must be redacted on flush()
+    const eofEmail = new StreamingRedactor();
+    expect(eofEmail.push('Email: john@gmail.com')).toBe('Email: ');
+    expect(eofEmail.flush()).toBe('[REDACTED]');
+    expect(eofEmail.getStats().bufferedChars).toBe(0);
+
+    // Incomplete non-PII prefixes held at EOF must be flushed verbatim without data loss
+    const benignEmailPrefix = new StreamingRedactor();
+    expect(benignEmailPrefix.push('Incomplete handle john@')).toBe('Incomplete handle ');
+    expect(benignEmailPrefix.flush()).toBe('john@');
+    expect(benignEmailPrefix.getStats().bufferedChars).toBe(0);
+
+    const benignNumericPrefix = new StreamingRedactor();
+    expect(benignNumericPrefix.push('Partial reference 123-45')).toBe('Partial reference ');
+    expect(benignNumericPrefix.flush()).toBe('123-45');
+    expect(benignNumericPrefix.getStats().bufferedChars).toBe(0);
+  });
+
   it('maintains O(1) bounded memory across a long 250,000+ character stream', () => {
     const redactor = new StreamingRedactor();
     let totalLength = 0;

@@ -73,13 +73,14 @@ export class TokenVerifier {
       return { authenticated: false, reason: 'MISSING_HEADER' };
     }
 
-    const parts = headerValue.trim().split(' ');
-    if (parts.length !== 2) {
+    const trimmedHeader = headerValue.trim();
+    const bearerMatch = /^Bearer[\t ]+(\S+)$/i.exec(trimmedHeader);
+    if (!bearerMatch) {
       return { authenticated: false, reason: 'MALFORMED_HEADER' };
     }
 
-    const [scheme, rawToken] = parts;
-    if (!scheme || scheme.toLowerCase() !== 'bearer' || !rawToken || rawToken.length === 0) {
+    const rawToken = bearerMatch[1];
+    if (!rawToken || rawToken.length === 0) {
       return { authenticated: false, reason: 'MALFORMED_HEADER' };
     }
 

@@ -69,8 +69,20 @@ describe('Task 1 MCP Server Integration (Official SDK Client & Raw Stdio Protoco
     const customerTool = listResult.tools.find((t) => t.name === 'get_customer_record');
     const refundTool = listResult.tools.find((t) => t.name === 'trigger_refund');
 
+    expect(customerTool?.title).toBeUndefined();
+    expect(refundTool?.title).toBeUndefined();
     expect(customerTool?.inputSchema.additionalProperties).toBe(false);
     expect(refundTool?.inputSchema.additionalProperties).toBe(false);
+    expect(Object.keys(customerTool?.inputSchema.properties ?? {})).toEqual(['customer_id']);
+    expect(Object.keys(refundTool?.inputSchema.properties ?? {}).sort()).toEqual([
+      'amount',
+      'customer_id',
+      'reason',
+    ]);
+    const customerIdProp = (
+      customerTool?.inputSchema.properties as Record<string, { pattern?: string }> | undefined
+    )?.['customer_id'];
+    expect(customerIdProp?.pattern).toBe('^CUST-[0-9]{5}$');
     expect(stderrChunks.join('')).toContain('MCP server connected over stdio transport');
   });
 

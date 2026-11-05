@@ -98,9 +98,13 @@ describe('Exhaustive Split-Boundary & Multi-Chunk Redaction Suite (Task 3)', () 
   }
 
   it('redacts email, SSN, and credit card across every 3-chunk split of the secret itself', () => {
-    const secrets = ['john@gmail.com', '123-45-6789', '4111-1111-1111-1111'];
+    const cases = [
+      { secret: 'john@gmail.com', forbiddenFragments: ['john', '@gmail', 'gmail.com'] },
+      { secret: '123-45-6789', forbiddenFragments: ['123', '45-', '6789'] },
+      { secret: '4111-1111-1111-1111', forbiddenFragments: ['4111', '1111'] },
+    ] as const;
 
-    for (const secret of secrets) {
+    for (const { secret, forbiddenFragments } of cases) {
       for (let i = 1; i < secret.length - 1; i += 1) {
         for (let j = i + 1; j < secret.length; j += 1) {
           const chunks = [
@@ -108,9 +112,16 @@ describe('Exhaustive Split-Boundary & Multi-Chunk Redaction Suite (Task 3)', () 
             secret.slice(i, j),
             `${secret.slice(j)} suffix.`,
           ];
-          const { fullOutput } = streamChunks(chunks);
+          const { fullOutput, emittedPieces } = streamChunks(chunks);
           expect(fullOutput).toBe('Prefix [REDACTED] suffix.');
           expect(fullOutput).not.toContain(secret);
+
+          for (const piece of emittedPieces) {
+            expect(piece).not.toContain(secret);
+            for (const frag of forbiddenFragments) {
+              expect(piece).not.toContain(frag);
+            }
+          }
         }
       }
     }
@@ -120,10 +131,25 @@ describe('Exhaustive Split-Boundary & Multi-Chunk Redaction Suite (Task 3)', () 
     const raw =
       'Single-char stream: email user.one@sub.domain.org, SSN 123-45-6789, card 4111 1111 1111 1111!';
     const singleCharChunks = Array.from(raw);
-    const { fullOutput } = streamChunks(singleCharChunks);
+    const { fullOutput, emittedPieces } = streamChunks(singleCharChunks);
 
     expect(fullOutput).toBe(
       'Single-char stream: email [REDACTED], SSN [REDACTED], card [REDACTED]!',
     );
+
+    const forbiddenFragments = [
+      'user.one',
+      '@sub',
+      'domain.org',
+      '123-',
+      '45-6789',
+      '4111',
+      '1111',
+    ];
+    for (const piece of emittedPieces) {
+      for (const frag of forbiddenFragments) {
+        expect(piece).not.toContain(frag);
+      }
+    }
   });
 });

@@ -20,18 +20,18 @@ An HTTP JSON-RPC 2.0 reverse proxy that authenticates AI agent callers via Beare
 
 ## Environment Variables
 
-| Variable                 | Default                                      | Description                                                                |
-| ------------------------ | -------------------------------------------- | -------------------------------------------------------------------------- |
-| `GATEWAY_HOST`           | `127.0.0.1`                                  | Host interface for the security gateway                                    |
-| `GATEWAY_PORT`           | `4010`                                       | TCP port for the security gateway                                          |
-| `DOWNSTREAM_HOST`        | `127.0.0.1`                                  | Host interface for the downstream mock server                              |
-| `DOWNSTREAM_PORT`        | `4011`                                       | TCP port for the downstream mock server                                    |
-| `DOWNSTREAM_MCP_URL`     | `http://127.0.0.1:4011/mcp`                  | Upstream target URL forwarded to by the gateway                            |
-| `START_DOWNSTREAM_MOCK`  | `true`                                       | Automatically start the local downstream mock server alongside the gateway |
-| `GATEWAY_TIMEOUT_MS`     | `5000`                                       | Upstream HTTP forwarding timeout in milliseconds                           |
-| `GATEWAY_MAX_BODY_BYTES` | `65536`                                      | Maximum allowed incoming JSON-RPC request body size in bytes               |
-| `ADMIN_TOKEN`            | `local-demo-admin-token-do-not-use-in-prod`  | Local-only demonstration token mapped to `admin`                           |
-| `VIEWER_TOKEN`           | `local-demo-viewer-token-do-not-use-in-prod` | Local-only demonstration token mapped to `viewer`                          |
+| Variable                 | Default                     | Description                                                                |
+| ------------------------ | --------------------------- | -------------------------------------------------------------------------- |
+| `GATEWAY_HOST`           | `127.0.0.1`                 | Host interface for the security gateway                                    |
+| `GATEWAY_PORT`           | `4010`                      | TCP port for the security gateway                                          |
+| `DOWNSTREAM_HOST`        | `127.0.0.1`                 | Host interface for the downstream mock server                              |
+| `DOWNSTREAM_PORT`        | `4011`                      | TCP port for the downstream mock server                                    |
+| `DOWNSTREAM_MCP_URL`     | `http://127.0.0.1:4011/mcp` | Upstream target URL forwarded to by the gateway                            |
+| `START_DOWNSTREAM_MOCK`  | `true`                      | Automatically start the local downstream mock server alongside the gateway |
+| `GATEWAY_TIMEOUT_MS`     | `5000`                      | Upstream HTTP forwarding timeout in milliseconds                           |
+| `GATEWAY_MAX_BODY_BYTES` | `65536`                     | Maximum allowed incoming JSON-RPC request body size in bytes               |
+| `ADMIN_TOKEN`            | `admin-token`               | Local-only demonstration token mapped to `admin`                           |
+| `VIEWER_TOKEN`           | `viewer-token`              | Local-only demonstration token mapped to `viewer`                          |
 
 ## Running & Testing
 
@@ -43,41 +43,113 @@ npm run dev:task2
 npm run test:task2
 ```
 
-## Copy-Pasteable `curl` Verification Requests
+## Copy-Pasteable Verification Requests
 
 ### 1. Missing Token -> `HTTP 401`
 
+**Bash:**
+
+**Bash:**
 ```bash
 curl -i -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+'@ | curl.exe -i -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" --data-binary "@-"
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+'@ | curl.exe -i -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" --data-binary "@-"
+```
+
 ### 2. Viewer Calling `tools/list` -> `HTTP 200` (Forwarded)
 
+**Bash:**
+
+**Bash:**
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-demo-viewer-token-do-not-use-in-prod" \
+  -H "Authorization: Bearer viewer-token" \
   -d '{"jsonrpc":"2.0","id":"list-1","method":"tools/list"}'
+```
+
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":"list-1","method":"tools/list"}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":"list-1","method":"tools/list"}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
 ```
 
 ### 3. Viewer Calling Normal Tool (`get_customer_record`) -> `HTTP 200` (Allowed)
 
+**Bash:**
+
+**Bash:**
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-demo-viewer-token-do-not-use-in-prod" \
+  -H "Authorization: Bearer viewer-token" \
   -d '{"jsonrpc":"2.0","id":"call-normal","method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}'
+```
+
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-normal","method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-normal","method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
 ```
 
 ### 4. Viewer Calling `admin_reset_key` -> Intercepted (`-32001 Unauthorized Tool Call`)
 
+**Bash:**
+
+**Bash:**
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-demo-viewer-token-do-not-use-in-prod" \
+  -H "Authorization: Bearer viewer-token" \
   -d '{"jsonrpc":"2.0","id":"call-blocked","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}'
+```
+
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-blocked","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-blocked","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer viewer-token" --data-binary "@-"
 ```
 
 Expected response:
@@ -92,11 +164,29 @@ Expected response:
 
 ### 5. Admin Calling `admin_reset_key` -> `HTTP 200` (Allowed)
 
+**Bash:**
+
+**Bash:**
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-demo-admin-token-do-not-use-in-prod" \
+  -H "Authorization: Bearer admin-token" \
   -d '{"jsonrpc":"2.0","id":"call-admin","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}'
+```
+
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-admin","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer admin-token" --data-binary "@-"
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-admin","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"acme"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp -H "Content-Type: application/json" -H "Authorization: Bearer admin-token" --data-binary "@-"
 ```
 
 ### 6. Inspect Downstream Mock Invocation Counters

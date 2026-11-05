@@ -32,6 +32,8 @@ export const ChatCompletionStreamRequestSchema = z
   })
   .strict();
 
+export type RequestValidationErrorCode = 'MALFORMED_JSON' | 'VALIDATION_ERROR';
+
 export type RequestValidationOutcome =
   | {
       readonly valid: true;
@@ -39,16 +41,28 @@ export type RequestValidationOutcome =
     }
   | {
       readonly valid: false;
+      readonly errorCode: RequestValidationErrorCode;
       readonly message: string;
     };
 
 export function validateChatCompletionRequest(rawBody: string): RequestValidationOutcome {
+  const normalizedBody = rawBody.startsWith('\uFEFF') ? rawBody.slice(1) : rawBody;
+
+  if (normalizedBody.trim().length === 0) {
+    return {
+      valid: false,
+      errorCode: 'MALFORMED_JSON',
+      message: 'Malformed JSON request body: request body must not be empty.',
+    };
+  }
+
   let parsedJson: unknown;
   try {
-    parsedJson = JSON.parse(rawBody);
+    parsedJson = JSON.parse(normalizedBody);
   } catch {
     return {
       valid: false,
+      errorCode: 'MALFORMED_JSON',
       message: 'Malformed JSON request body.',
     };
   }
@@ -63,6 +77,7 @@ export function validateChatCompletionRequest(rawBody: string): RequestValidatio
       .join('; ');
     return {
       valid: false,
+      errorCode: 'VALIDATION_ERROR',
       message: `Invalid chat completion request: ${details}`,
     };
   }

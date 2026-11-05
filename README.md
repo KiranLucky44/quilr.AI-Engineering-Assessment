@@ -2,7 +2,12 @@
 
 ## 1. Project Overview
 
-`quill-ai-engineering-assessment` is a production-grade **Node.js 24 LTS / strict TypeScript ESM monorepo** implementing four independent AI infrastructure, Model Context Protocol (MCP), real-time guardrail, and LLM gateway systems.
+`quill-ai-engineering-assessment` is a production-grade **Node.js 24 LTS / strict TypeScript ESM monorepo** implementing four independent AI infrastructure, Model Context Protocol (MCP), real-time guardrail, and LLM gateway systems:
+
+1. **Task 1 (`packages/task-1-mcp-server`)**: Custom MCP Server over `stdio` using official `@modelcontextprotocol/sdk` v1.x with strict Zod validation, deterministic customer/refund tools, and pure JSON-RPC stdout isolation.
+2. **Task 2 (`packages/task-2-mcp-security-gateway`)**: HTTP JSON-RPC 2.0 reverse proxy gateway (`:4010`) enforcing SHA-256 constant-time Bearer authentication and role-based tool authorization (`admin_*` tool blocking with JSON-RPC `-32001`) in front of a downstream mock MCP server (`:4011`).
+3. **Task 3 (`packages/task-3-llm-streaming-guardrail`)**: OpenAI-compatible SSE streaming proxy (`:4020`) performing real-time stateful PII redaction (Emails, US SSNs, Luhn-validated Credit Cards) across chunk boundaries with $O(1)$ bounded memory (`MAX_HOLD_BUFFER_LENGTH = 256`), backpressure handling, and client disconnect cancellation.
+4. **Task 4 (`packages/task-4-model-router`)**: SQLite-backed rolling 60-second sliding-window token rate limiter (`50,000` tokens default quota) and failover LLM router (`:4030`) using atomic `BEGIN IMMEDIATE` transactions in WAL mode with 3,000ms `AbortController` cancellation and failover on HTTP `429` / timeout.
 
 Every service operates deterministically out-of-the-box on `localhost` with zero paid LLM API keys, zero external cloud dependencies, strict input/output validation, comprehensive automated test coverage, and sanitized error boundaries.
 
@@ -13,24 +18,13 @@ Every service operates deterministically out-of-the-box on `localhost` with zero
 Modern enterprise AI deployments require strong protocol boundaries, least-privilege tool governance, real-time sensitive data redaction across streaming token chunks, and atomic multi-tenant cost/rate controls with resilient model failover. This monorepo demonstrates:
 
 - **Protocol Fidelity**: Genuine MCP JSON-RPC 2.0 over `stdio` (`stdout` protocol purity, `-32602` Invalid Params mapping) and HTTP reverse-proxy inspection.
-- **Zero-Trust Security Controls**: Constant-time SHA-256 Bearer digest verification, pre-forwarding `admin_*` RBAC enforcement, credential stripping, and sanitized error envelopes.
+- **Zero-Trust Security Controls**: Constant-time SHA-256 Bearer digest verification (`crypto.timingSafeEqual`), pre-forwarding `admin_*` RBAC enforcement, credential stripping, and sanitized error envelopes.
 - **Stateful Streaming Algorithms**: $O(1)$ bounded-memory (`256`-char ceiling) streaming PII redaction across arbitrary chunk splits with backpressure and disconnect cancellation.
 - **Transactional Persistence & Resilience**: On-disk SQLite (`WAL` mode + `BEGIN IMMEDIATE`) rolling 60-second sliding-window token budgets paired with `AbortController`-driven primary-to-secondary failover.
 
 ---
 
-## 3. Explanation of All Four Tasks
-
-| Task       | Workspace Package                         | Summary                                                                                                                                                                                                                                                       |
-| ---------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Task 1** | `packages/task-1-mcp-server`              | Official `@modelcontextprotocol/sdk` (`v1.32.2`) stdio server exposing `get_customer_record` and simulated `trigger_refund` with `.strict()` Zod validation, `-32602` error mapping, and strict `stdout`/`stderr` isolation.                                  |
-| **Task 2** | `packages/task-2-mcp-security-gateway`    | Native HTTP JSON-RPC 2.0 reverse proxy (`:4010/mcp`) authenticating `admin` and `viewer` Bearer tokens, blocking `viewer` calls to `admin_*` tools with `-32001` before reaching the downstream mock MCP server (`:4011/mcp`).                                |
-| **Task 3** | `packages/task-3-llm-streaming-guardrail` | OpenAI-compatible SSE proxy (`:4020/v1/chat/completions`) performing stateful, bounded-buffer real-time redaction (`[REDACTED]`) of Email addresses, US SSNs, and Luhn-validated Credit/Debit cards across chunk boundaries.                                  |
-| **Task 4** | `packages/task-4-model-router`            | HTTP LLM Gateway (`:4030/v1/chat/completions`) enforcing a `50,000`-token / `60s` per-tenant sliding window in on-disk SQLite (`better-sqlite3` WAL + `BEGIN IMMEDIATE`, SHA-256 tenant hashing) with `3,000ms` abort-safe failover on HTTP `429` or timeout. |
-
----
-
-## 4. Main Architecture Diagram
+## 3. Architecture Diagram
 
 ```mermaid
 flowchart TB
@@ -47,21 +41,21 @@ flowchart TB
 
     subgraph Task3["Task 3: Streaming PII Redaction (:4020)"]
       A3["SSE Client"] <-->|"POST /v1/chat/completions\ntext/event-stream"| B3["StreamingRedactor\n<=256-char Bounded Buffer"]
-      B3 <-->|"Normalized Deltas + AbortSignal"| C3["MockLLMProvider"]
+      B3 <-->|"Normalized Deltas + AbortSignal"| C3["MockLLMProvider / OllamaProvider"]
     end
 
     subgraph Task4["Task 4: Token Limiter & Model Router (:4030)"]
       A4["Tenant Client"] -->|"POST /v1/chat/completions\nBearer API Key"| B4["ModelRouter + TiktokenCounter"]
       B4 <-->|"BEGIN IMMEDIATE (WAL)"| DB4[("SQLite On-Disk DB\nSHA-256 Tenant Hashes")]
-      B4 -->|"1. Primary (3000ms AbortController)"| P4["MockPrimaryProvider"]
-      B4 -.->|"2. Fallback ONLY on 429 / >3000ms"| S4["MockSecondaryProvider"]
+      B4 -->|"1. Primary (3000ms AbortController)"| P4["MockPrimaryProvider / OpenAICompatible"]
+      B4 -.->|"2. Fallback ONLY on 429 / >3000ms"| S4["MockSecondaryProvider / OpenAICompatible"]
     end
   end
 ```
 
 ---
 
-## 5. Technology Stack
+## 4. Technology Stack
 
 | Layer                | Technology / Package                                                            | Pinned Version                 |
 | -------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
@@ -78,12 +72,13 @@ flowchart TB
 
 ---
 
-## 6. Complete Repository Folder Structure
+## 5. Repository Structure
 
 ```text
 quill-ai-engineering-assessment/
 ├── .editorconfig
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .prettierignore
 ├── .prettierrc.json
@@ -151,16 +146,19 @@ quill-ai-engineering-assessment/
     │   ├── tsconfig.build.json
     │   ├── tsconfig.json
     │   ├── src/
+    │   │   ├── config.ts
     │   │   ├── index.ts
     │   │   ├── server.ts
     │   │   ├── middleware/request-validator.ts
     │   │   ├── providers/llm-provider.interface.ts
     │   │   ├── providers/mock-llm.provider.ts
+    │   │   ├── providers/ollama.provider.ts
     │   │   ├── streaming/pii-patterns.ts
     │   │   ├── streaming/sse-encoder.ts
     │   │   └── streaming/streaming-redactor.ts
     │   └── tests/
     │       ├── chunk-boundary.test.ts
+    │       ├── ollama-provider.test.ts
     │       ├── pii-patterns.test.ts
     │       ├── streaming-redactor.test.ts
     │       └── streaming.integration.test.ts
@@ -181,12 +179,14 @@ quill-ai-engineering-assessment/
         │   ├── providers/mock-primary.provider.ts
         │   ├── providers/mock-secondary.provider.ts
         │   ├── providers/model-provider.interface.ts
+        │   ├── providers/openai-compatible.provider.ts
         │   ├── router/fallback-policy.ts
         │   └── router/model-router.ts
         └── tests/
             ├── concurrency.test.ts
             ├── database.test.ts
             ├── fallback.test.ts
+            ├── openai-compatible-provider.test.ts
             ├── rate-limiter.test.ts
             ├── router.integration.test.ts
             └── token-counter.test.ts
@@ -194,214 +194,272 @@ quill-ai-engineering-assessment/
 
 ---
 
-## 7. Prerequisites
+## 6. Prerequisites
 
-- **Node.js**: `v24.0.0` or newer (verified on `v24.5.0` LTS)
-- **npm**: `v10.0.0` or newer (verified on `v11.5.1`)
+- **Node.js**: `v24.0.0` or newer (verified on Node.js 24 LTS)
+- **npm**: `v10.0.0` or newer
 - **Git**: `v2.30+`
-- No external databases, Docker containers, or paid API keys are required.
+- **Zero External Dependencies**: No Docker, Redis, PostgreSQL, or paid API keys required. All services run on local loopback (`127.0.0.1`) with built-in mock providers and an on-disk SQLite WAL database.
+- _(Optional)_ **Ollama**: If you wish to demonstrate live local LLM inference in Tasks 3 and 4, install [Ollama](https://ollama.com/) and run `ollama pull llama3.2:1b`.
 
 ---
 
-## 8. Installation Instructions
+## 7. Installation Instructions
 
-From the repository root:
+Clone the repository and install locked dependencies from the repository root:
 
 ```bash
-npm install
+git clone <repository-url>
+cd quill-ai-engineering-assessment
+npm ci
 npm run build
 ```
 
+The build command compiles TypeScript project references across all four workspace packages into their respective `dist/` directories and copies the SQLite database schema.
+
 ---
 
-## 9. Environment Setup
+## 8. Environment Configuration
 
-All four packages include safe local defaults so they start immediately without any `.env` file. If you wish to customize ports, quotas, or demo tokens locally, copy `.env.example` (never commit `.env`):
+All four packages include safe, deterministic local defaults and will start immediately without a `.env` file. To customize ports, log levels, or demo credentials, copy `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-See `.env.example` and each package's `README.md` for the complete list of supported environment variables.
+> **Security Invariant**: Never commit `.env` to version control. The repository `.gitignore` strictly ignores `.env` and all `.env.*` variants (except `.env.example`). All tokens in `.env.example` are non-secret local demonstration fixtures.
 
 ---
 
-## 10. How to Run Each Task Independently
+## 9. Task 1 Setup and Execution
 
-From the repository root:
+Task 1 implements a pure Model Context Protocol (MCP) server over `stdio`:
+
+- **Exposed Tools**: `get_customer_record` (`customer_id: ^CUST-[0-9]{5}$`) and `trigger_refund` (`customer_id`, finite `amount > 0`, trimmed `reason >= 10 chars`).
+- **Validation**: Strict Zod schemas reject unexpected extra properties with JSON-RPC error `-32602` (`Invalid Params`).
+- **Stdio Protocol Purity**: `process.stdout` emits strictly newline-delimited JSON-RPC 2.0 frames; all diagnostic logs are routed exclusively to `process.stderr`.
 
 ```bash
-# Task 1: Start MCP server over stdio
+# Start Task 1 in development mode (listens on stdin)
 npm run dev:task1
 
-# Task 2: Start MCP Security Gateway (:4010) + Downstream Mock (:4011)
-npm run dev:task2
-
-# Task 3: Start LLM Streaming PII Redaction Gateway (:4020)
-npm run dev:task3
-
-# Task 4: Start SQLite Token Limiter & Model Failover Router (:4030)
-npm run dev:task4
-```
-
-Each package can also be started directly from its compiled `dist/` output after `npm run build`:
-
-```bash
-npm start --workspace=@quill-ai/task-1-mcp-server
-npm start --workspace=@quill-ai/task-2-mcp-security-gateway
-npm start --workspace=@quill-ai/task-3-llm-streaming-guardrail
-npm start --workspace=@quill-ai/task-4-model-router
+# Run Task 1 automated test suite
+npm run test:task1
 ```
 
 ---
 
-## 11. How to Run All Tests
+## 10. Task 2 Setup and Execution
+
+Task 2 implements an HTTP reverse proxy security gateway (`:4010`) and a downstream mock MCP server (`:4011`):
+
+- **Authentication**: `Authorization: Bearer <token>` verified via SHA-256 digests and `crypto.timingSafeEqual`.
+- **Tool Authorization**: `tools/list` is forwarded for all authenticated roles. `tools/call` for any tool prefixed with `admin_` (e.g., `admin_reset_key`) requires the `admin` role; `viewer` calls are blocked with JSON-RPC `-32001` before reaching downstream.
+- **Sanitized Errors**: Downstream connection failures return sanitized `502 Bad Gateway` envelopes without leaking upstream paths.
 
 ```bash
-# Run every test suite across all 4 tasks
-npm run test
+# Start Gateway (:4010) and Downstream Mock (:4011) together
+npm run dev:task2
 
-# Run individual task test suites
-npm run test:task1
+# Run Task 2 automated test suite
 npm run test:task2
+```
+
+---
+
+## 11. Task 3 Setup and Execution
+
+Task 3 implements an OpenAI-compatible SSE streaming proxy (`:4020/v1/chat/completions`):
+
+- **PII Redaction**: Redacts Email addresses, US Social Security Numbers, and Luhn-validated Credit Card numbers into `[REDACTED]`.
+- **Chunk-Split Resilience**: Detects and redacts sensitive patterns even when split across arbitrary chunk boundaries (including 1-character chunks).
+- **$O(1)$ Bounded Memory**: Holds at most `MAX_HOLD_BUFFER_LENGTH = 256` characters plus a `1`-character left-boundary tracker; never buffers full responses.
+- **Provider Modes**: Defaults to `LLM_PROVIDER=mock`. Supports real local Ollama streaming via `LLM_PROVIDER=ollama` (`http://127.0.0.1:11434/v1`, model `llama3.2:1b`).
+
+```bash
+# Start Task 3 streaming gateway (:4020)
+npm run dev:task3
+
+# Run Task 3 automated test suite
 npm run test:task3
+```
+
+---
+
+## 12. Task 4 Setup and Execution
+
+Task 4 implements a SQLite-backed token rate limiter and failover model router (`:4030/v1/chat/completions`):
+
+- **Atomic Quota**: Rolling 60-second window enforcing a default quota of **`50,000` tokens per tenant** in an on-disk WAL-enabled SQLite database (`data/model-router.sqlite`).
+- **Atomic Concurrency**: Evaluates rolling usage and inserts `RESERVED` rows inside a single `BEGIN IMMEDIATE` transaction, preventing concurrent bursts from exceeding quota.
+- **Failover Routing**: Invokes Primary (`MockPrimaryProvider` or `OpenAICompatibleModelProvider`) with a 3,000ms `AbortController` timeout; fails over to Secondary **exclusively** on HTTP `429` or timeout.
+- **Usage Settlement**: Reconciles to actual `usage.total_tokens` (`SETTLED`) on completion; releases reservations (`RELEASED`, `actual_tokens = 0`) on upstream failure.
+
+```bash
+# Start Task 4 model router gateway (:4030)
+npm run dev:task4
+
+# Run Task 4 automated test suite
 npm run test:task4
 ```
 
 ---
 
-## 12. How to Run Type Checking
+## 13. Individual Test Commands
 
 ```bash
-npm run typecheck
+# Task 1 (Custom MCP Server)
+npm run test:task1
+
+# Task 2 (MCP Security Gateway)
+npm run test:task2
+
+# Task 3 (LLM Streaming Guardrail)
+npm run test:task3
+
+# Task 4 (Model Router & Limiter)
+npm run test:task4
 ```
 
 ---
 
-## 13. How to Run Linting & Formatting Checks
+## 14. Complete Verification Command
+
+To run the complete verification pipeline (clean build, strict typecheck, ESLint analysis, Prettier formatting check, and all automated tests across all four workspaces):
 
 ```bash
-# Static analysis (ESLint strictTypeChecked)
-npm run lint
-
-# Formatting verification (Prettier)
-npm run format:check
-
-# Full end-to-end verification pipeline (build + typecheck + lint + format:check + test)
 npm run verify
 ```
 
+To run individual checks across the entire monorepo:
+
+```bash
+npm run build           # Compile TypeScript across all workspaces
+npm run typecheck       # Strict typecheck (tsc --noEmit) across all workspaces
+npm run lint            # ESLint static analysis (strictTypeChecked)
+npm run format:check    # Prettier formatting verification
+npm test                # Vitest full test run across all packages
+```
+
 ---
 
-## 14. Example API Requests
+## 15. Example PowerShell Requests
 
-### Task 1 (MCP over Stdio)
+Because Windows PowerShell 5.1 strips unescaped double quotes inside CLI arguments (`curl.exe -d '{...}'`), always pipe request bodies over stdin using `--data-binary "@-"`:
+
+### Task 1: Stdio MCP Protocol Call
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"pwsh","version":"1.0.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}
+'@ | npm run --silent dev:task1
+```
+
+### Task 2: Security Gateway (`tools/call` Admin Tool as Viewer -> `-32001`)
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"tenant-01"}}}
+'@ | curl.exe -s -X POST http://127.0.0.1:4010/mcp `
+  -H "Content-Type: application/json" `
+  -H "Authorization: Bearer viewer-token" `
+  --data-binary "@-"
+```
+
+### Task 3: Streaming Guardrail with Split PII
+
+```powershell
+@'
+{
+  "model": "quill-mock-gpt",
+  "stream": true,
+  "mock_scenario": "email_three_chunk",
+  "messages": [{"role": "user", "content": "Return synthetic contact"}]
+}
+'@ | curl.exe -N -X POST http://127.0.0.1:4020/v1/chat/completions `
+  -H "Content-Type: application/json" `
+  --data-binary "@-"
+```
+
+### Task 4: Rate Limiter & Model Router
+
+```powershell
+@'
+{
+  "model": "quill-enterprise-1",
+  "max_tokens": 40,
+  "messages": [{"role": "user", "content": "Say hello briefly."}]
+}
+'@ | curl.exe -i -X POST http://127.0.0.1:4030/v1/chat/completions `
+  -H "Authorization: Bearer demo-tenant-1" `
+  -H "Content-Type: application/json" `
+  --data-binary "@-"
+```
+
+---
+
+## 16. Example Bash Requests
+
+### Task 1: Stdio MCP Protocol Call
 
 ```bash
 printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"cli","version":"1.0.0"}}}' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bash","version":"1.0.0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_customer_record","arguments":{"customer_id":"CUST-12345"}}}' \
   | npm run --silent dev:task1
 ```
 
-### Task 2 (MCP Security Gateway — Port `4010`)
+### Task 2: Security Gateway (`tools/call` Admin Tool as Viewer -> `-32001`)
 
 ```bash
 curl -s -X POST http://127.0.0.1:4010/mcp \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer local-demo-admin-token-do-not-use-in-prod" \
-  -d '{"jsonrpc":"2.0","id":"req-1","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"tenant-01"}}}'
+  -H "Authorization: Bearer viewer-token" \
+  -d '{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"admin_reset_key","arguments":{"tenant_id":"tenant-01"}}}'
 ```
 
-### Task 3 (Streaming PII Redaction Gateway — Port `4020`)
+### Task 3: Streaming Guardrail with Split PII
 
 ```bash
 curl -N -X POST http://127.0.0.1:4020/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"quill-mock-gpt","stream":true,"mock_scenario":"email_three_chunk","messages":[{"role":"user","content":"Redact split email"}]}'
+  -d '{"model":"quill-mock-gpt","stream":true,"mock_scenario":"email_three_chunk","messages":[{"role":"user","content":"Return synthetic contact"}]}'
 ```
 
-### Task 4 (SQLite Token Rate Limiter & Failover Router — Port `4030`)
+### Task 4: Rate Limiter & Model Router
 
 ```bash
-curl -s -X POST http://127.0.0.1:4030/v1/chat/completions \
+curl -i -X POST http://127.0.0.1:4030/v1/chat/completions \
+  -H "Authorization: Bearer demo-tenant-1" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer demo-tenant-key-1" \
-  -d '{"model":"quill-enterprise-1","max_tokens":128,"mock_scenario":"primary_429","messages":[{"role":"user","content":"Route with 429 failover"}]}'
+  -d '{"model":"quill-enterprise-1","max_tokens":40,"messages":[{"role":"user","content":"Say hello briefly."}]}'
 ```
 
 ---
 
-## 15. Example Responses
+## 17. Expected Responses
 
-### Task 2 Authorized `admin_reset_key` Response
+### Task 1 Successful `get_customer_record` Response
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": "req-1",
+  "id": 2,
   "result": {
     "content": [
       {
         "type": "text",
-        "text": "{\"operation\":\"admin_reset_key\",\"tenant_id\":\"tenant-01\",\"key_version\":\"v2-rotated\",\"simulated\":true}"
+        "text": "{\"customer_id\":\"CUST-12345\",\"name\":\"Elena Vance\",\"email\":\"elena.vance@blackmesa.internal\",\"tier\":\"PLATINUM\",\"total_spend\":18450.75,\"active_orders_count\":3,\"created_at\":\"2024-03-15T08:30:00.000Z\"}"
       }
     ]
   }
 }
 ```
 
-### Task 3 Redacted SSE Stream Output
-
-```text
-data: {"id":"chatcmpl_mock_deterministic_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","system_fingerprint":"fp_quill_guardrail_v1","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-
-data: {"id":"chatcmpl_mock_deterministic_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","system_fingerprint":"fp_quill_guardrail_v1","choices":[{"index":0,"delta":{"content":"Contact "},"finish_reason":null}]}
-
-data: {"id":"chatcmpl_mock_deterministic_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","system_fingerprint":"fp_quill_guardrail_v1","choices":[{"index":0,"delta":{"content":"[REDACTED] regarding the "},"finish_reason":null}]}
-
-data: {"id":"chatcmpl_mock_deterministic_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","system_fingerprint":"fp_quill_guardrail_v1","choices":[{"index":0,"delta":{"content":"request."},"finish_reason":null}]}
-
-data: {"id":"chatcmpl_mock_deterministic_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","system_fingerprint":"fp_quill_guardrail_v1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
-```
-
-### Task 4 Secondary Failover Completion Response
-
-```json
-{
-  "id": "chatcmpl_secondary_req_...",
-  "object": "chat.completion",
-  "created": 1769904000,
-  "model": "quill-enterprise-1-fallback",
-  "request_id": "req_...",
-  "provider": "mock-secondary",
-  "routed_via_fallback": true,
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "Secondary failover model response (quill-enterprise-1-fallback): processed \"Route with 429 failover\""
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 6,
-    "completion_tokens": 18,
-    "total_tokens": 24
-  }
-}
-```
-
----
-
-## 16. Example Error Responses
-
-### Task 1 Invalid Tool Input (`-32602`)
+### Task 1 Validation Error (`-32602 Invalid Params`)
 
 ```json
 {
@@ -414,12 +472,12 @@ data: [DONE]
 }
 ```
 
-### Task 2 Viewer Blocked from `admin_*` Tool (`-32001`)
+### Task 2 Blocked Viewer Call (`-32001 Unauthorized Tool Call`)
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": "call-blocked",
+  "id": "call-1",
   "error": {
     "code": -32001,
     "message": "Unauthorized Tool Call"
@@ -427,105 +485,137 @@ data: [DONE]
 }
 ```
 
-### Task 4 Rate Limit Exceeded (`HTTP 429`) & Total Provider Outage (`HTTP 503`)
+### Task 3 Redacted SSE Stream Output
+
+```text
+data: {"id":"chatcmpl_mock_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_mock_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","choices":[{"index":0,"delta":{"content":"Contact "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_mock_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","choices":[{"index":0,"delta":{"content":"[REDACTED] regarding the "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_mock_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","choices":[{"index":0,"delta":{"content":"request."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_mock_01","object":"chat.completion.chunk","created":1769904000,"model":"quill-mock-gpt","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+### Task 4 Successful Routed Completion
+
+```json
+{
+  "id": "chatcmpl_req_...",
+  "object": "chat.completion",
+  "created": 1769904000,
+  "model": "quill-enterprise-1",
+  "request_id": "req_...",
+  "provider": "mock-primary",
+  "routed_via_fallback": false,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Primary model response (quill-enterprise-1): processed \"Say hello briefly.\""
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 16,
+    "total_tokens": 24
+  }
+}
+```
+
+### Task 4 Rate Limit Exceeded (`HTTP 429`)
 
 ```json
 {
   "error": {
     "code": "RATE_LIMIT_EXCEEDED",
     "message": "Tenant token quota of 50000 tokens per rolling 60s window exceeded.",
-    "request_id": "req_e4f8a912-...",
-    "retry_after_ms": 48210
-  }
-}
-```
-
-```json
-{
-  "error": {
-    "code": "MODEL_UNAVAILABLE",
-    "message": "All model providers are currently unavailable.",
-    "request_id": "req_91bc0421-..."
+    "request_id": "req_...",
+    "retry_after_ms": 42150
   }
 }
 ```
 
 ---
 
-## 17. Mock Credentials for Local Development
+## 18. Local Development Configuration
 
-> **WARNING**: The values below are non-secret local-only fixtures for assessment verification. Never reuse static shared tokens in production environments.
-
-- **Task 2 Admin Bearer Token**: `local-demo-admin-token-do-not-use-in-prod`
-- **Task 2 Viewer Bearer Token**: `local-demo-viewer-token-do-not-use-in-prod`
-- **Task 4 Tenant Bearer API Keys**: Any non-empty Bearer string (e.g., `demo-tenant-alpha-key`, `demo-tenant-beta-key`) identifies an isolated tenant bucket via its SHA-256 hash.
-
----
-
-## 18. Default Port Numbers
-
-| Service                      | Host        | Default Port           | Primary Endpoint            |
-| ---------------------------- | ----------- | ---------------------- | --------------------------- |
-| Task 1 Custom MCP Server     | `stdio`     | N/A (`stdin`/`stdout`) | JSON-RPC 2.0 over stdio     |
-| Task 2 MCP Security Gateway  | `127.0.0.1` | `4010`                 | `POST /mcp`                 |
-| Task 2 Downstream Mock MCP   | `127.0.0.1` | `4011`                 | `POST /mcp`, `GET /health`  |
-| Task 3 Streaming PII Gateway | `127.0.0.1` | `4020`                 | `POST /v1/chat/completions` |
-| Task 4 Model Router Gateway  | `127.0.0.1` | `4030`                 | `POST /v1/chat/completions` |
+| Service                      | Host        | Default Port           | Primary Route               | Default Auth / Identity               |
+| ---------------------------- | ----------- | ---------------------- | --------------------------- | ------------------------------------- |
+| Task 1 Custom MCP Server     | `stdio`     | N/A (`stdin`/`stdout`) | JSON-RPC 2.0 frames         | Stdio session transport               |
+| Task 2 MCP Security Gateway  | `127.0.0.1` | `4010`                 | `POST /mcp`                 | `Bearer admin-token` / `viewer-token` |
+| Task 2 Downstream Mock MCP   | `127.0.0.1` | `4011`                 | `POST /mcp`, `GET /health`  | Internal loopback target              |
+| Task 3 Streaming PII Gateway | `127.0.0.1` | `4020`                 | `POST /v1/chat/completions` | Unauthenticated open proxy            |
+| Task 4 Model Router Gateway  | `127.0.0.1` | `4030`                 | `POST /v1/chat/completions` | `Bearer <any-tenant-id>` (SHA-256)    |
 
 ---
 
-## 19. SQLite Database Explanation
+## 19. SQLite Persistence Explanation
 
-Task 4 initializes a real on-disk SQLite database at runtime under `packages/task-4-model-router/data/model-router.sqlite` (ignored by `.gitignore`).
+Task 4 initializes an on-disk SQLite database at `packages/task-4-model-router/data/model-router.sqlite` (ignored by git):
 
-- **Pragmas**: `journal_mode = WAL`, `busy_timeout = 5000`, `foreign_keys = ON`, `synchronous = NORMAL`.
-- **Tables (`STRICT`)**:
-  - `tenants`: Stores `tenant_hash` (`CHECK (length(tenant_hash) = 64)`), `created_at`, and `last_seen_at`.
-  - `token_usage_ledger`: Stores `id`, `tenant_hash` (`FOREIGN KEY ... ON DELETE CASCADE`), `request_id` (`UNIQUE`), `reserved_tokens`, `actual_tokens`, `status` (`RESERVED | SETTLED | RELEASED`), `created_at`, and `updated_at`, indexed by `(tenant_hash, status, created_at)`.
-
----
-
-## 20. PII Redaction Explanation
-
-`StreamingRedactor` (`packages/task-3-llm-streaming-guardrail/src/streaming/streaming-redactor.ts`) solves chunk-split PII leakage without full-response buffering:
-
-1. **Bounded Holdback Window**: Enforces `MAX_HOLD_BUFFER_LENGTH = 256` characters (`254` max RFC email + `2` right-boundary lookahead chars) plus a `1`-character `lastInputChar` left-boundary context, guaranteeing $O(1)$ memory regardless of response size.
-2. **Immediate Safe Flushing**: Characters preceding the earliest viable Email/SSN/Card suffix at the tail of the buffer are emitted immediately on the same chunk tick.
-3. **Right-Boundary Extension Protection**: Complete matches touching the end of a chunk (such as `"john@gmail.co"` before `"m"` or `".uk"`, or 9 digits `"411111111"` before the remaining 7 digits of a 16-digit card) remain held until a non-extending delimiter arrives or `flush()` executes at stream completion.
-
----
-
-## 21. Rate-Limiter Design Explanation
-
-`SlidingWindowLimiter` (`packages/task-4-model-router/src/limiter/sliding-window-limiter.ts`) implements a two-phase **Reserve -> Settle/Release** ledger:
-
-1. **Server-Side Token Counting**: `TiktokenTokenCounter` (`cl100k_base`) counts chat prompt tokens and adds requested `max_tokens` (or `ROUTER_DEFAULT_MAX_TOKENS`), ignoring any client-claimed usage.
-2. **Atomic Write-Locked Reservation**: `reserveAtomicTx.immediate(...)` executes `BEGIN IMMEDIATE` so SQLite's write lock is acquired _before_ evicting expired rows (`created_at <= now - 60_000`) and summing active `SETTLED` + in-flight `RESERVED` tokens. Two simultaneous requests whose combined reservations exceed `50,000` tokens are serialized at the database lock level so at most one succeeds.
-3. **Reconciliation**: Upon completion, `settleReservation` updates the row to `SETTLED` with authoritative provider `totalTokens` (or conservative BPE fallback). Failed upstream calls invoke `releaseReservation` (`RELEASED`, `actual_tokens = 0`), backed by a stale-reservation TTL sweep (`120s`) for crash recovery.
+- **Pragmas**:
+  - `journal_mode = WAL`: Write-Ahead Logging allows concurrent readers while a single writer commits.
+  - `busy_timeout = 5000`: Coordinates write locks across parallel workers/threads for up to 5 seconds.
+  - `foreign_keys = ON`: Enforces relational integrity between tenants and ledger rows.
+  - `synchronous = NORMAL`: Ensures zero database corruption on process termination with low I/O latency.
+- **Relational Schema (`STRICT`)**:
+  - `tenants`: Stores `tenant_hash TEXT PRIMARY KEY` (64-char SHA-256 hex digest), `created_at`, `last_seen_at`.
+  - `token_usage_ledger`: Stores `id`, `tenant_hash REFERENCES tenants`, `request_id TEXT NOT NULL UNIQUE`, `reserved_tokens INTEGER > 0`, `actual_tokens INTEGER`, `status TEXT CHECK(status IN ('RESERVED', 'SETTLED', 'RELEASED'))`, `created_at`, and `updated_at`.
+  - Index: `idx_token_usage_tenant_window ON token_usage_ledger(tenant_hash, status, created_at)`.
+- **Atomic Two-Phase Reservation**:
+  - `tryReserveTokens`: `BEGIN IMMEDIATE` write transaction evicts expired rows (`created_at <= now - 60s`), checks `active_tokens + reservedTokens <= quotaLimit`, and inserts a `RESERVED` row before the provider is contacted.
+  - `settleReservation`: Updates the row to `SETTLED` with actual tokens consumed.
+  - `releaseReservation`: Updates the row to `RELEASED` with `actual_tokens = 0` on upstream provider failure.
 
 ---
 
-## 22. Security Limitations and Assumptions
+## 20. Security Considerations
 
-- **Task 2 Development Token Map**: Static `ADMIN_TOKEN` / `VIEWER_TOKEN` environment mapping is purely a local assessment fixture. Production gateways should verify short-lived signed JWTs (OIDC/JWKS) with audience/issuer claims or mTLS workload certificates.
-- **Local Plaintext Loopback**: Gateways bind to `127.0.0.1` over HTTP for zero-certificate local evaluation; production deployments require TLS 1.3 termination.
-- **Simulated Refund & Key Rotation Actions**: All business side effects (`trigger_refund`, `admin_reset_key`, `admin_delete_customer`) are strictly deterministic in-memory simulations.
-
----
-
-## 23. Known Limitations
-
-- **Structured vs. Unstructured PII**: Task 3 deterministically redacts Emails, US SSNs, and Payment Card numbers; unstructured free-text entities (such as person names or physical street addresses) require a complementary NER model layer.
-- **Single-Host SQLite Scope**: Task 4's WAL SQLite store coordinates concurrency across async requests, worker threads, and local processes sharing a filesystem, but horizontally scaled multi-host clusters require a networked store (e.g., Redis Lua or PostgreSQL).
-- **JSON-RPC Batch Requests**: Task 2 intentionally rejects JSON-RPC batch arrays (`-32600`) to preserve unambiguous per-call RBAC enforcement and auditability.
+1. **Credential Hygiene**: Plaintext bearer tokens and API keys are never persisted to disk or logged. Task 2 hashes tokens in memory and compares digests via `crypto.timingSafeEqual`. Task 4 stores only 64-character SHA-256 digests in SQLite.
+2. **Error Envelope Sanitization**: Client error payloads never expose upstream hostnames, internal database schemas, operating system paths, or raw stack traces.
+3. **Least-Privilege Tool Execution**: `admin_*` tools are gated at the proxy before reaching downstream MCP servers.
+4. **Stream Memory Bounds**: Task 3 enforces a strict `256`-character maximum holdback window, eliminating memory exhaustion attacks on long streaming responses.
+5. **Pre-Provider Quota Gating**: Rejected rate-limit requests (`429`) exit before contacting upstream model providers, preventing financial denial-of-wallet exhaustion.
 
 ---
 
-## 24. Troubleshooting Guide
+## 21. Mock Provider versus Real Provider Configuration
 
-| Symptom                                                   | Cause                                                                                                    | Resolution                                                                                                       |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `EADDRINUSE` on ports `4010`, `4011`, `4020`, or `4030`   | Another local process is already listening on the default port                                           | Override `GATEWAY_PORT`, `DOWNSTREAM_PORT`, `STREAMING_GATEWAY_PORT`, or `ROUTER_PORT` via environment variables |
-| `better-sqlite3` load error after switching Node versions | Node ABI changed after `npm install`                                                                     | Ensure `node -v` is Node.js 24 LTS (`>=24.0.0`) and re-run `npm rebuild better-sqlite3` or `npm ci`              |
-| `curl` buffers SSE output in Task 3                       | `curl` buffers output by default unless `-N` (`--no-buffer`) is passed                                   | Run `curl -N ...` to observe real-time SSE chunks as they arrive                                                 |
-| Task 1 produces no output when started manually           | Task 1 uses MCP `stdio` transport and waits for JSON-RPC frames on `stdin` (startup logs go to `stderr`) | Pipe JSON-RPC lines to `stdin` (see Section 14) or attach `@modelcontextprotocol/inspector`                      |
+Each task is built to be completely self-contained without requiring paid API credentials or external network access.
+
+### Deterministic Mock Providers (Default for Automated Tests)
+
+- **Task 3 (`MockLLMProvider`)**: Generates deterministic text chunks and supports fault injection via `mock_scenario` (`email_split`, `ssn_split`, `credit_card_split`, `mid_stream_error`).
+- **Task 4 (`MockPrimaryProvider` & `MockSecondaryProvider`)**: Support deterministic fault injection (`primary_429`, `primary_timeout`, `primary_500`, `both_unavailable`).
+- Default configuration in `.env.example`: `LLM_PROVIDER=mock`.
+
+### Real Local LLM Provider (Optional Ollama Support)
+
+Both Task 3 and Task 4 include native adapters for local Ollama models (`POST /v1/chat/completions`):
+
+- **Task 3 (`OllamaProvider`)**: Real SSE stream parser piping upstream token deltas through `StreamingRedactor`.
+- **Task 4 (`OpenAICompatibleModelProvider`)**: HTTP model adapter supporting timeouts, cancellation, and HTTP 429 error mapping.
+- To switch to Ollama, update `.env`:
+  ```dotenv
+  LLM_PROVIDER=ollama
+  OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+  OLLAMA_MODEL=llama3.2:1b
+  ```
+- **Opt-In Live Tests**: Run `OLLAMA_LIVE_TEST=true npm test` to execute live end-to-end streaming and rate-limiting tests against a running local Ollama instance.
+
+---
+
+## 22. Known Limitations
+
+1. **Local Demonstration Authentication**: Task 2 maps static `ADMIN_TOKEN` / `VIEWER_TOKEN` strings for assessment demonstration. Production deployments should verify cryptographically signed OIDC JWTs with audience and issuer verification.
+2. **Local Loopback Scope**: Services bind to `127.0.0.1` over HTTP for local evaluation. Production deployments require TLS 1.3 termination and reverse-proxy ingress.
+3. **Single-Node SQLite Scope**: Task 4 coordinates concurrency across async requests, worker threads, and local processes sharing the SQLite WAL file. Multi-node distributed clusters require a distributed coordination store (e.g., Redis or PostgreSQL).
+4. **Regex/Luhn PII Scope**: Task 3 deterministically redacts structured Emails, US SSNs, and ISO/IEC 7812 Payment Cards. Unstructured entities (such as person names or physical street addresses) require complementary NER model inference.

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { validateChatCompletionRequest } from './middleware/request-validator.js';
 import type { LLMStreamProvider } from './providers/llm-provider.interface.js';
 import { MockLLMProvider } from './providers/mock-llm.provider.js';
+import { UpstreamStreamProviderError } from './providers/ollama.provider.js';
 import {
   encodeCompletionChunkSse,
   encodeSseDone,
@@ -31,59 +32,180 @@ class PayloadTooLargeError extends Error {
   }
 }
 
-function isJsonContentType(headerValue: string | undefined): boolean {
-  if (!headerValue) {
-    return false;
+class InvalidUtf8BodyError extends Error {
+  public constructor() {
+    super('Request body must be valid UTF-8 encoded JSON.');
+    this.name = 'InvalidUtf8BodyError';
   }
-  const mediaType = headerValue.split(';')[0]?.trim().toLowerCase();
-  return mediaType === 'application/json';
 }
 
-function readBoundedBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+class BodyReadError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'BodyReadError';
+  }
+}
+
+type ContentTypeValidationResult =
+  { readonly valid: true } | { readonly valid: false; readonly message: string };
+
+function validateJsonContentType(headerValue: string | undefined): ContentTypeValidationResult {
+  if (!headerValue || headerValue.trim().length === 0) {
+    return {
+      valid: false,
+      message: 'Content-Type must be application/json.',
+    };
+  }
+
+  const segments = headerValue.split(';');
+  const mediaType = segments[0]?.trim().toLowerCase();
+  if (mediaType !== 'application/json') {
+    return {
+      valid: false,
+      message: 'Content-Type must be application/json.',
+    };
+  }
+
+  for (let i = 1; i < segments.length; i += 1) {
+    const param = segments[i]?.trim() ?? '';
+    if (param.length === 0) {
+      continue;
+    }
+    const eqIndex = param.indexOf('=');
+    if (eqIndex === -1) {
+      continue;
+    }
+    const key = param.slice(0, eqIndex).trim().toLowerCase();
+    if (key === 'charset') {
+      const rawCharset = param
+        .slice(eqIndex + 1)
+        .trim()
+        .replace(/^"(.*)"$/, '$1')
+        .toLowerCase();
+      if (rawCharset !== 'utf-8' && rawCharset !== 'utf8') {
+        return {
+          valid: false,
+          message: 'Unsupported Content-Type charset; only UTF-8 is supported.',
+        };
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+export function readBoundedBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+  if (req.readableEnded || req.readableFlowing !== null) {
+    return Promise.reject(new BodyReadError('Request body stream has already been consumed.'));
+  }
+
   return new Promise((resolvePromise, rejectPromise) => {
+    let expectedBytes: number | null = null;
     const declared = req.headers['content-length'];
     if (declared !== undefined) {
-      const parsedLength = Number.parseInt(declared, 10);
-      if (Number.isFinite(parsedLength) && parsedLength > maxBytes) {
+      const trimmedDeclared = declared.trim();
+      if (!/^\d+$/.test(trimmedDeclared)) {
+        req.resume();
+        rejectPromise(new BodyReadError('Invalid Content-Length header.'));
+        return;
+      }
+      const parsedLength = Number.parseInt(trimmedDeclared, 10);
+      if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) {
+        req.resume();
+        rejectPromise(new BodyReadError('Invalid Content-Length header.'));
+        return;
+      }
+      if (parsedLength > maxBytes) {
         req.resume();
         rejectPromise(new PayloadTooLargeError());
         return;
       }
+      expectedBytes = parsedLength;
     }
 
     const chunks: Buffer[] = [];
     let total = 0;
     let settled = false;
 
-    req.on('data', (chunk: Buffer) => {
+    const cleanup = (): void => {
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      req.removeListener('aborted', onAborted);
+      req.removeListener('close', onClose);
+    };
+
+    const onData = (chunk: Buffer | string): void => {
       if (settled) {
         return;
       }
-      total += chunk.length;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+      total += buf.byteLength;
       if (total > maxBytes) {
         settled = true;
+        cleanup();
         req.resume();
         rejectPromise(new PayloadTooLargeError());
         return;
       }
-      chunks.push(chunk);
-    });
+      chunks.push(buf);
+    };
 
-    req.on('end', () => {
+    const onEnd = (): void => {
       if (settled) {
         return;
       }
       settled = true;
-      resolvePromise(Buffer.concat(chunks).toString('utf8'));
-    });
+      cleanup();
 
-    req.on('error', (err) => {
+      if (!req.complete || (expectedBytes !== null && total !== expectedBytes)) {
+        rejectPromise(new BodyReadError('Incomplete HTTP request body.'));
+        return;
+      }
+
+      const rawBytes =
+        chunks.length === 1 ? (chunks[0] ?? Buffer.alloc(0)) : Buffer.concat(chunks, total);
+      try {
+        const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+        const decoded = utf8Decoder.decode(rawBytes);
+        resolvePromise(decoded);
+      } catch {
+        rejectPromise(new InvalidUtf8BodyError());
+      }
+    };
+
+    const onError = (err: Error): void => {
       if (settled) {
         return;
       }
       settled = true;
+      cleanup();
       rejectPromise(err);
-    });
+    };
+
+    const onAborted = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      rejectPromise(new BodyReadError('Client aborted HTTP request body upload.'));
+    };
+
+    const onClose = (): void => {
+      if (settled || req.complete) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      rejectPromise(new BodyReadError('Connection closed before HTTP request body completed.'));
+    };
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+    req.on('aborted', onAborted);
+    req.on('close', onClose);
   });
 }
 
@@ -148,14 +270,9 @@ export function createStreamingGuardrailServer(
     res: ServerResponse,
     requestId: string,
   ): Promise<void> => {
-    if (!isJsonContentType(req.headers['content-type'])) {
-      writeJsonError(
-        res,
-        415,
-        'UNSUPPORTED_MEDIA_TYPE',
-        'Content-Type must be application/json.',
-        requestId,
-      );
+    const contentTypeCheck = validateJsonContentType(req.headers['content-type']);
+    if (!contentTypeCheck.valid) {
+      writeJsonError(res, 415, 'UNSUPPORTED_MEDIA_TYPE', contentTypeCheck.message, requestId);
       return;
     }
 
@@ -173,13 +290,22 @@ export function createStreamingGuardrailServer(
         );
         return;
       }
-      writeJsonError(res, 400, 'INVALID_REQUEST', 'Failed to read request body.', requestId);
+      if (err instanceof InvalidUtf8BodyError) {
+        writeJsonError(res, 400, 'INVALID_UTF8', err.message, requestId);
+        return;
+      }
+      const message = err instanceof BodyReadError ? err.message : 'Failed to read request body.';
+      writeJsonError(res, 400, 'INVALID_REQUEST', message, requestId);
       return;
     }
 
     const validation = validateChatCompletionRequest(rawBody);
     if (!validation.valid) {
-      writeJsonError(res, 400, 'INVALID_REQUEST', validation.message, requestId);
+      logEvent('warn', 'request.validation_failed', requestId, {
+        errorCode: validation.errorCode,
+        bodyByteLength: Buffer.byteLength(rawBody, 'utf8'),
+      });
+      writeJsonError(res, 400, validation.errorCode, validation.message, requestId);
       return;
     }
 
@@ -196,14 +322,18 @@ export function createStreamingGuardrailServer(
     req.once('aborted', onClientDisconnect);
     res.once('close', onClientDisconnect);
 
-    res.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache, no-transform',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-      'x-request-id': requestId,
-    });
-    res.flushHeaders();
+    const ensureSseHeadersSent = (): void => {
+      if (!res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+          'x-accel-buffering': 'no',
+          'x-request-id': requestId,
+        });
+        res.flushHeaders();
+      }
+    };
 
     const redactor = new StreamingRedactor();
     let streamId = `chatcmpl_${requestId}`;
@@ -220,6 +350,8 @@ export function createStreamingGuardrailServer(
         if (abortController.signal.aborted) {
           break;
         }
+
+        ensureSseHeadersSent();
 
         streamId = delta.id;
         streamCreated = delta.created;
@@ -277,6 +409,7 @@ export function createStreamingGuardrailServer(
       }
 
       if (!abortController.signal.aborted && !res.writableEnded && !res.destroyed) {
+        ensureSseHeadersSent();
         const tailSafeChunk = redactor.flush();
         if (tailSafeChunk.length > 0) {
           await writeSseWithBackpressure(
@@ -314,10 +447,33 @@ export function createStreamingGuardrailServer(
         redactionCount: stats.redactionCount,
         peakBufferedChars: stats.peakBufferedChars,
       });
-    } catch {
+    } catch (err) {
       streamFinished = true;
-      logEvent('error', 'stream.upstream_error', requestId);
+      logEvent('error', 'stream.upstream_error', requestId, {
+        kind: err instanceof UpstreamStreamProviderError ? err.kind : 'UNKNOWN',
+      });
       if (!abortController.signal.aborted && !res.writableEnded && !res.destroyed) {
+        if (!res.headersSent) {
+          if (err instanceof UpstreamStreamProviderError && err.kind === 'TIMEOUT') {
+            writeJsonError(
+              res,
+              504,
+              'UPSTREAM_TIMEOUT',
+              'Upstream model provider timed out before responding.',
+              requestId,
+            );
+          } else {
+            writeJsonError(
+              res,
+              502,
+              'UPSTREAM_UNAVAILABLE',
+              'Upstream model provider is unavailable or returned an invalid response.',
+              requestId,
+            );
+          }
+          return;
+        }
+
         const flushedBeforeError = redactor.flush();
         if (flushedBeforeError.length > 0) {
           res.write(

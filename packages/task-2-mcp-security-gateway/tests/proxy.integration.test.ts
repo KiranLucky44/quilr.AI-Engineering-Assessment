@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { loadGatewayConfig } from '../src/config.js';
 import {
   createDownstreamMockServer,
   type DownstreamMockServerHandle,
@@ -8,6 +9,7 @@ import {
   type GatewayLogEvent,
   type SecurityGatewayHandle,
 } from '../src/gateway.js';
+import { startSecurityGatewayStack } from '../src/index.js';
 
 describe('Task 2 MCP Security Gateway End-to-End Proxy Integration', () => {
   const ADMIN_TOKEN = 'secret-admin-bearer-token-value-xyz';
@@ -346,5 +348,136 @@ describe('Task 2 MCP Security Gateway End-to-End Proxy Integration', () => {
     const serializedLogs = JSON.stringify(capturedLogs);
     expect(serializedLogs).not.toContain(ADMIN_TOKEN);
     expect(serializedLogs).not.toContain(VIEWER_TOKEN);
+  });
+
+  it('authenticates default local viewer-token and admin-token via loadGatewayConfig() and rejects invalid/missing headers', async () => {
+    const defaultConfig = loadGatewayConfig(
+      {
+        GATEWAY_PORT: '0',
+        DOWNSTREAM_PORT: '0',
+      },
+      { dotEnvPaths: [] },
+    );
+
+    const localGatewayLogs: GatewayLogEvent[] = [];
+    const localGateway = createMcpSecurityGateway({
+      downstreamMcpUrl: `http://127.0.0.1:${downstreamPort}/mcp`,
+      adminToken: defaultConfig.adminToken,
+      viewerToken: defaultConfig.viewerToken,
+      logSink: (entry) => {
+        localGatewayLogs.push(entry);
+      },
+    });
+    const port = await localGateway.listen(0, '127.0.0.1');
+    const url = `http://127.0.0.1:${port}/mcp`;
+
+    try {
+      // 1. Missing Authorization header -> 401
+      const missingAuth = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      });
+      expect(missingAuth.status).toBe(401);
+
+      // 2. Invalid Bearer token -> 401
+      const badAuth = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer invalid-token',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+      });
+      expect(badAuth.status).toBe(401);
+
+      // 3. Valid viewer-token -> 200 on tools/list, -32001 on admin_reset_key
+      const viewerList = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer viewer-token',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'dev-viewer-list', method: 'tools/list' }),
+      });
+      expect(viewerList.status).toBe(200);
+      const viewerListJson = (await viewerList.json()) as {
+        id: string;
+        result: { tools: unknown[] };
+      };
+      expect(viewerListJson.id).toBe('dev-viewer-list');
+      expect(viewerListJson.result.tools.length).toBeGreaterThan(0);
+
+      const viewerAdminBlock = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer viewer-token',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'dev-viewer-block',
+          method: 'tools/call',
+          params: { name: 'admin_reset_key', arguments: { tenant_id: 'acme' } },
+        }),
+      });
+      expect(viewerAdminBlock.status).toBe(200);
+      const viewerAdminJson = (await viewerAdminBlock.json()) as { error: { code: number } };
+      expect(viewerAdminJson.error.code).toBe(-32001);
+
+      // 4. Valid admin-token -> 200 on admin_reset_key
+      const adminCall = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer admin-token',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'dev-admin-ok',
+          method: 'tools/call',
+          params: { name: 'admin_reset_key', arguments: { tenant_id: 'acme' } },
+        }),
+      });
+      expect(adminCall.status).toBe(200);
+      const adminCallJson = (await adminCall.json()) as { id: string; result?: unknown };
+      expect(adminCallJson.id).toBe('dev-admin-ok');
+      expect(adminCallJson.result).toBeDefined();
+
+      // 5. Ensure plaintext tokens are never logged
+      const logDump = JSON.stringify(localGatewayLogs);
+      expect(logDump).not.toContain('viewer-token');
+      expect(logDump).not.toContain('admin-token');
+    } finally {
+      await localGateway.close();
+    }
+  });
+
+  it('cleans up downstream mock server if gateway port is already occupied (EADDRINUSE)', async () => {
+    const blocker = createDownstreamMockServer();
+    const occupiedPort = await blocker.listen(0, '127.0.0.1');
+
+    const prevGatewayPort = process.env['GATEWAY_PORT'];
+    const prevDownstreamPort = process.env['DOWNSTREAM_PORT'];
+    process.env['GATEWAY_PORT'] = String(occupiedPort);
+    process.env['DOWNSTREAM_PORT'] = '0';
+
+    try {
+      await expect(startSecurityGatewayStack()).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+      });
+    } finally {
+      if (prevGatewayPort === undefined) {
+        delete process.env['GATEWAY_PORT'];
+      } else {
+        process.env['GATEWAY_PORT'] = prevGatewayPort;
+      }
+      if (prevDownstreamPort === undefined) {
+        delete process.env['DOWNSTREAM_PORT'];
+      } else {
+        process.env['DOWNSTREAM_PORT'] = prevDownstreamPort;
+      }
+      await blocker.close();
+    }
   });
 });

@@ -71,3 +71,23 @@ export class ProviderTimeoutError extends Error {
     this.timeoutMs = timeoutMs;
   }
 }
+
+export class ProviderConnectionError extends Error {
+  public readonly providerName: string;
+
+  public constructor(providerName: string, internalDetail: string) {
+    super(internalDetail);
+    this.name = 'ProviderConnectionError';
+    this.providerName = providerName;
+  }
+}
+
+export class ProviderMalformedResponseError extends Error {
+  public readonly providerName: string;
+
+  public constructor(providerName: string, internalDetail: string) {
+    super(internalDetail);
+    this.name = 'ProviderMalformedResponseError';
+    this.providerName = providerName;
+  }
+}

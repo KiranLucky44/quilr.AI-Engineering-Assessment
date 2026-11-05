@@ -53,13 +53,37 @@ npm run test:task1
 
 You can pipe MCP JSON-RPC messages directly over `stdin` to observe pure JSON-RPC `stdout` responses:
 
+**Bash:**
+
+**Bash:**
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-cli","version":"1.0.0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"trigger_refund","params":{},"arguments":{"customer_id":"CUST-12345","amount":150.50,"reason":"Duplicate payment"}}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"trigger_refund","arguments":{"customer_id":"CUST-12345","amount":150.50,"reason":"Duplicate payment"}}}' \
   | npm run --silent dev:task1
+```
+
+**Windows PowerShell:**
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-cli","version":"1.0.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"trigger_refund","arguments":{"customer_id":"CUST-12345","amount":150.50,"reason":"Duplicate payment"}}}
+'@ | npm run --silent dev:task1
+```
+
+**Windows PowerShell:**
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-cli","version":"1.0.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"trigger_refund","arguments":{"customer_id":"CUST-12345","amount":150.50,"reason":"Duplicate payment"}}}
+'@ | npm run --silent dev:task1
 ```
 
 ### Expected Tool Call Response (`id: 3`)
@@ -110,8 +134,22 @@ Response:
 
 ## Optional Inspection with MCP Inspector
 
-If you wish to explore the tools interactively in a browser UI (completely optional):
+### Web UI Mode
 
 ```bash
-npx @modelcontextprotocol/inspector npx tsx packages/task-1-mcp-server/src/index.ts
+npm run build --workspace=@quill-ai/task-1-mcp-server
+npx @modelcontextprotocol/inspector node packages/task-1-mcp-server/dist/index.js
+```
+
+> **Important MCP Inspector Web UI Input Tip**:
+>
+> - In **Form Mode**, enter the raw field value `CUST-12345` (without surrounding quotes or braces) into the `customer_id` field, and click **Execute Tool** directly (pressing `Enter` inside a string field in MCP Inspector v2.x inserts a `\n` newline character into the string, which strict `^CUST-[0-9]{5}$` validation rightly rejects with `-32602`).
+> - To paste full JSON payloads like `{"customer_id":"CUST-12345"}` or `{"customer_id":"CUST-12345","amount":150.50,"reason":"Duplicate payment"}`, switch the Arguments input from **Form** to **JSON** mode first.
+
+### CLI Mode
+
+```bash
+npx @modelcontextprotocol/inspector --cli --method tools/call --tool-name get_customer_record --tool-arg customer_id=CUST-12345 -- node packages/task-1-mcp-server/dist/index.js
+
+npx @modelcontextprotocol/inspector --cli --method tools/call --tool-name trigger_refund --tool-arg customer_id=CUST-12345 amount=150.50 "reason=Duplicate payment" -- node packages/task-1-mcp-server/dist/index.js
 ```

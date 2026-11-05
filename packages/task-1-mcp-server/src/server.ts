@@ -58,7 +58,6 @@ export function createCustomerOpsMcpServer(deps: CustomerOpsServerDependencies =
   mcpServer.registerTool(
     'get_customer_record',
     {
-      title: 'Get Customer Record',
       description:
         'Retrieves a deterministic customer account profile and order history by strict customer ID (^CUST-[0-9]{5}$).',
       inputSchema: GetCustomerRecordSchema,
@@ -72,7 +71,6 @@ export function createCustomerOpsMcpServer(deps: CustomerOpsServerDependencies =
   mcpServer.registerTool(
     'trigger_refund',
     {
-      title: 'Trigger Simulated Refund',
       description:
         'Triggers a deterministic simulated customer refund after validating customer ID, positive finite amount, and reason length.',
       inputSchema: TriggerRefundSchema,
@@ -94,7 +92,14 @@ export function createCustomerOpsMcpServer(deps: CustomerOpsServerDependencies =
       const parsed = GetCustomerRecordSchema.safeParse(rawArgs);
       if (!parsed.success) {
         const message = formatValidationIssues(toolName, parsed.error);
-        logger.warn('Rejected invalid get_customer_record arguments', { tool: toolName });
+        logger.warn('Rejected invalid get_customer_record arguments', {
+          tool: toolName,
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join('.') || 'arguments',
+            code: issue.code,
+            message: issue.message,
+          })),
+        });
         throw new McpError(ErrorCode.InvalidParams, message);
       }
 
@@ -120,7 +125,14 @@ export function createCustomerOpsMcpServer(deps: CustomerOpsServerDependencies =
       const parsed = TriggerRefundSchema.safeParse(rawArgs);
       if (!parsed.success) {
         const message = formatValidationIssues(toolName, parsed.error);
-        logger.warn('Rejected invalid trigger_refund arguments', { tool: toolName });
+        logger.warn('Rejected invalid trigger_refund arguments', {
+          tool: toolName,
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join('.') || 'arguments',
+            code: issue.code,
+            message: issue.message,
+          })),
+        });
         throw new McpError(ErrorCode.InvalidParams, message);
       }
 
